@@ -12,7 +12,8 @@
 #include "Adafruit_BluefruitLE_UART.h"
 #include "config.h"
 
-// Enable Debug Mode
+// Enable Debug Mode - Device will wait for 10 seconds for a serial connection
+// if not discovered will revert back to debug=false;
 bool DEBUG = true;
 
 /**************************************************************************/
@@ -24,13 +25,24 @@ Adafruit_BluefruitLE_SPI ble(BLUEFRUIT_SPI_CS, BLUEFRUIT_SPI_IRQ, BLUEFRUIT_SPI_
 void setup(void) {
 
   log(F("Roplotter Firmware V1"));
+
+  pinMode(LED_BUILTIN, OUTPUT);
+  digitalWrite(LED_BUILTIN, HIGH);
   
   showState(STATE_SETUP_STARTED);
-
+  
+  int start = millis();
   if (DEBUG) {
-    while (!Serial);  
+    while (!Serial) { 
+      if (millis() - start > 10000) {
+        DEBUG=false;
+        break;  
+      }
+    }  
     Serial.begin(115200);
   }
+
+  digitalWrite(LED_BUILTIN, LOW);
 
   // Initialise BLE module
   log(F("Initialising BLE..."));
