@@ -12,6 +12,13 @@
 #include "Adafruit_BluefruitLE_UART.h"
 #include "config.h"
 
+#if defined(HASOLED)
+  #include <Adafruit_GFX.h>
+  #include <Adafruit_SSD1306.h>
+  #include <Adafruit_FeatherOLED.h>
+  Adafruit_FeatherOLED oled = Adafruit_FeatherOLED();
+#endif
+
 // Enable Debug Mode - Device will wait for 10 seconds for a serial connection
 // if not discovered will revert back to debug=false;
 bool DEBUG = true;
@@ -24,20 +31,27 @@ Adafruit_BluefruitLE_SPI ble(BLUEFRUIT_SPI_CS, BLUEFRUIT_SPI_IRQ, BLUEFRUIT_SPI_
 
 void setup(void) {
 
-  log(F("Roplotter Firmware V1"));
-
+  // Display
+  #if defined(HASOLED) 
+    oled.init();
+    oled.setBatteryVisible(true);
+    log(F("Roplotter Firmware V1"));
+    delay(1000);
+  #endif
+  
   pinMode(LED_BUILTIN, OUTPUT);
   digitalWrite(LED_BUILTIN, HIGH);
-  
-  showState(STATE_SETUP_STARTED);
-  
+   
   int start = millis();
   if (DEBUG) {
     while (!Serial) { 
-      if (millis() - start > 10000) {
+      int remianing = 10000 - (millis() - start);
+      log("Waiting for serial:" + String(remianing) );
+      if (remianing < 1) {
         DEBUG=false;
         break;  
       }
+      delay(100);
     }  
     Serial.begin(115200);
   }
@@ -61,8 +75,6 @@ void setup(void) {
   ble.echo(false);
   if (DEBUG) ble.info();
   ble.verbose(false);
-
-
 }
 
 /**************************************************************************/
@@ -78,9 +90,9 @@ void loop(void) {
   waitForBLE();
   
   while (ble.available()) {
+    log(F("Data available"));
     // Get char
     char c = (char) ble.read();
-    Serial.print(c);
     // Count open braces
     if (c == '{') {
       count_open++;
@@ -98,13 +110,11 @@ void loop(void) {
       count_open = 0;
       count_close = 0;
     } 
-    
   }
-  
 }
 
 int processCMD(String cmdString) {
-  if (DEBUG) { Serial.print("Processing command: "); Serial.println(cmdString); }
+  log("Processing: " + cmdString); 
   StaticJsonBuffer<200> cmdBuffer;
   JsonObject& cmd = cmdBuffer.parseObject(cmdString);
 //  if (!cmd.success()) {
@@ -116,7 +126,6 @@ int processCMD(String cmdString) {
 //  }
   // Handle commands
   if(cmd["type"]=="getconfig") cmdGetConfig();
-  
 }
 
 void cmdGetConfig() {
@@ -165,7 +174,6 @@ void sendAck(bool receivedSuccessfully) {
 //    // Send characters to Bluefruit
 //    log("Sending: ");
 //    log(inputs);
-//    showState(STATE_TX_BLE);
 //    ble.print(inputs);
 //  }
 //
@@ -178,49 +186,97 @@ void sendAck(bool receivedSuccessfully) {
 
 void waitForBLE() {
   if (ble.isConnected()) return;
+  log(F("Waiting for BLE connection"));
   while (!ble.isConnected()) { delay(500); }
   // LED Activity command is only supported from 0.6.6
   if (ble.isVersionAtLeast(MINIMUM_FIRMWARE_VERSION)) {
       ble.sendCommandCheckOK("AT+HWModeLED=" MODE_LED_BEHAVIOUR);
   }
   // Set module to DATA mode
-  log( F("Switching to DATA mode!") );
   ble.setMode(BLUEFRUIT_MODE_DATA);
+  log(F("BLE connected"));
 }
 
 /**************************************************************************/
 /**************************************************************************/
 
 // Error helper
-void error(const __FlashStringHelper*err) {
-  Serial.println(err);
+void error(String e) {
+  if (DEBUG) Serial.println(e);
+  #if defined(HASOLED)
+    displayMessage("ERROR:" + String(e));
+  #endif
   while (1);
 }
 
 // Log helper
 void log(String s) {
   if (DEBUG) Serial.println(s);
+  #if defined(HASOLED)
+    displayMessage(s);
+  #endif
 }
 
-// Show system state
-void showState(int state) {
-//  switch (state) {
-//    case STATE_SETUP_STARTED:
-//      if (DEBUG) Serial.println("System started");
-//      break;
-//    case STATE_WAITING_BLE:
-//      if (DEBUG) Serial.println("Waiting for BLE connection");
-//      break;
-//    case STATE_RX_BLE:
-//      if (DEBUG) Serial.println("Received..");
-//      break;
-//    case STATE_TX_BLE:
-//      if (DEBUG) Serial.println("Sending data");
-//      break;
-//    case STATE_PROCESSING_CMD:
-//      if (DEBUG) Serial.println("Processing command");
-//      break;
-//    default:
-//      if (DEBUG) Serial.println("Unknown state");
-//  }
+// Display Message
+void displayMessage(String line1, String line2, String line3) {
+  oled.clearMsgArea();
+  // update the battery icon
+  displayBattery(); 
+  oled.println(line1);
+  oled.println(line2);
+  oled.println(line3);
+  oled.display();
 }
+void displayMessage(String line1) { return displayMessage(String(line1), String(""), String("")); }
+void displayMessage(String line1, String line2) { return displayMessage(String(line1), String(line2), String("")); }
+
+// Display Message
+void displayBattery() {
+  float battery = getBatteryVoltage();
+  oled.setBattery(battery);
+  oled.renderBattery();
+}
+
+/**************************************************************************/
+/**************************************************************************/
+
+#if defined(ARDUINO_ARCH_SAMD) || defined(__AVR_ATmega32U4__)
+  // m0 & 32u4 feathers
+  #define VBATPIN A7
+  float getBatteryVoltage() {
+    float measuredvbat = analogRead(VBATPIN);
+    measuredvbat *= 2;    // we divided by 2, so multiply back
+    measuredvbat *= 3.3;  // Multiply by 3.3V, our reference voltage
+    measuredvbat /= 1024; // convert to voltage
+    return measuredvbat;
+  }
+#elif defined(ESP8266)
+  // esp8266 feather
+  #define VBATPIN A0
+  float getBatteryVoltage() {
+    float measuredvbat = analogRead(VBATPIN);
+    measuredvbat *= 2;    // we divided by 2, so multiply back
+    measuredvbat *= 3.3;  // Multiply by 3.3V, our reference voltage
+    measuredvbat /= 1024; // convert to voltage
+    return measuredvbat;
+ }
+#elif defined(ARDUINO_STM32_FEATHER)
+  // wiced feather
+  #define VBATPIN PA1
+  float getBatteryVoltage() {
+    pinMode(VBATPIN, INPUT_ANALOG);
+    float measuredvbat = analogRead(VBATPIN);
+    measuredvbat *= 2;         // we divided by 2, so multiply back
+    measuredvbat *= 0.80566F;  // multiply by mV per LSB
+    measuredvbat /= 1000;      // convert to voltage
+    return measuredvbat;
+  }
+#else
+  // unknown platform
+  float getBatteryVoltage() {
+    error("warning: unknown feather. getting battery voltage failed.");
+    return 0.0F;
+  }
+#endif
+
+

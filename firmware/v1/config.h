@@ -27,6 +27,10 @@ pen pens[2] = {
   {1, SOUTH_POLE, '009900', 5, 20, 0}
 };
 
+// DISPLAY SETTINGS
+// ----------------------------------------------------------------------------------------------
+#define HASOLED // Comment ou if no OLED feather wing
+
 // COMMON SETTINGS
 // ----------------------------------------------------------------------------------------------
 #define BUFSIZE                        128   // Size of the read buffer for incoming data
